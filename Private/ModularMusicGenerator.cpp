@@ -9,6 +9,7 @@ extern "C" {
 
 #include <iostream>
 
+#include <set>
 #include <fluidsynth.h>
 #include <iostream>
 #include <chrono>
@@ -19,82 +20,39 @@ extern "C" {
 #include "TaskScheduler.h"
 #include "dump.h"
 #include "Debug.h"
+#include "AdvancedMIDIParser.h"
 
 static fluid_synth_t* synth;
 static TaskScheduler timeScheduler;
+static int undertalesfID;
 
-class MIDIParserChild : public MIDIParser
+
+class MIDIParserChild : public AdvancedMIDIParser
 {
 public:
-
-    // only 3 bytes
-    // msPerQuarterNote;
-    int tempo =  500000; // 120 bpm by default 
-    std::vector<uint32_t> timePerTrack; // in ms
-    uint32_t currentTrackIndex = 0;
-    int16_t ticksPerQuarterNote;
-
-    virtual void OnTrackLoaded() override
-    {
-        currentTrackIndex++;
-    }
-
-    virtual void OnFileHeaderDataLoaded(FileHeaderData& fileHeaderData) override
-    {
-        timePerTrack.resize(fileHeaderData.nbTracks);
-        ticksPerQuarterNote = fileHeaderData.delta.ticksPerQuarterNote;
-    }
+    using Super = AdvancedMIDIParser;
+    std::set<int> programIDs;
 
     virtual void OnSysEventLoaded(uint32_t deltaTime, SysexEvent& sysEvent) override 
     {
-        timePerTrack[currentTrackIndex] += deltaTime;
+        Super::OnSysEventLoaded(deltaTime, sysEvent);
 
         cout << "track-sysex" << '\n';
         cout << "  time: " << deltaTime << '\n';
     } 
     virtual void OnMetaEventLoaded(uint32_t deltaTime, MetaEvent& metaEvent) override 
     {
-        timePerTrack[currentTrackIndex] += deltaTime;
+        Super::OnMetaEventLoaded(deltaTime, metaEvent);
 
         cout << "track-meta\n";
         cout << "   time: " << deltaTime << '\n';
         cout << "   type: " << (int) metaEvent.type << "[" << MidiMetaToStr(metaEvent.type) << "]\n"; 
         cout << "   length: " << (int) metaEvent.length << "\n"; 
-
-        switch (metaEvent.type)
-        {
-            case EMidiMeta::SET_TEMPO:
-
-                tempo = (metaEvent.bytes[0] << 16) + (metaEvent.bytes[1] << 8) + metaEvent.bytes[2];
-                break;
-
-            case EMidiMeta::TIME_SIGNATURE:
-            {
-                assert(metaEvent.length == 4);
-                int nominator = metaEvent.bytes[0];
-                int denominator = 2 << metaEvent.bytes[1];
-                int clocks = metaEvent.bytes[2];
-                int notes = metaEvent.bytes[3];
-            }
-                break;
-
-            case EMidiMeta::END_OF_TRACK:
-                break;
-
-            case EMidiMeta::TRACK_NAME:
-            {
-                std::string trackName((char*)metaEvent.bytes, metaEvent.length);
-                break;
-            }
-
-            default:
-                throw std::runtime_error( MidiMetaToStr(metaEvent.type) );
-                break;    
-        }
     }
-    virtual void OnChannelEventLoaded(uint32_t deltaTime, ChannelEvent& channelEvent, bool isOpti) override 
+
+    virtual void OnChannelEventLoaded(uint32_t deltaTime, ChannelEvent& channelEvent, bool isOpti) override
     {
-        timePerTrack[currentTrackIndex] += deltaTime;
+        AdvancedMIDIParser::OnChannelEventLoaded(deltaTime, channelEvent, isOpti);
 
         cout << "track-midi" << '\n';
         cout << "  time: " << deltaTime << '\n';
@@ -102,49 +60,45 @@ public:
         cout << "  channel: " << (int) channelEvent.channel << '\n';
         cout << "  param1: " << (int) channelEvent.param1 << '\n';
         cout << "  param2: " << (int) channelEvent.param2 << '\n';
+    }
 
-        switch (channelEvent.message)
+    virtual void OnNoteOn(int channel, int key, int velocity) 
+    {
+        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key, velocity]()
         {
-            case ENoteEvent::NOTE_ON:
-                timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channelEvent]()
-                {
-                    fluid_synth_noteon(synth, channelEvent.channel, channelEvent.param1, channelEvent.param2);
-                });
-                break;
-
-            case ENoteEvent::NOTE_OFF:
-                timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channelEvent]()
-                {
-                    fluid_synth_noteoff(synth, channelEvent.channel, channelEvent.param1);
-                });
-                break;
-
-            case ENoteEvent::PGM_CHANGE:
-                timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channelEvent]()
-                {
-                    fluid_synth_program_change(synth, channelEvent.channel, channelEvent.param1);
-                });
-                break;
-
-            case ENoteEvent::CONTROL_CHANGE:
-                timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channelEvent]()
-                {
-                    fluid_synth_cc(synth, channelEvent.channel, channelEvent.param1, channelEvent.param2);
-                });
-                break;
-
-            case ENoteEvent::PITCH_BEND:
-                timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channelEvent]()
-                {
-                    fluid_synth_pitch_bend(synth, channelEvent.channel, channelEvent.param1);
-                });
-                break;
-
-            default:
-                std::cout <<ENoteEventToStr(channelEvent.message) << std::endl;
-                throw std::runtime_error( ENoteEventToStr(channelEvent.message) );
-                break;
-        }
+//             // if (channelEvent.param1 > 55 && channelEvent.param1 < 62)
+//             // if (channelEvent.param1 > 50 && channelEvent.param1 !=69 && channelEvent.channel < 7)
+// fluid_synth_program_select(synth, 0, undertalesfID, 0, 64);
+            fluid_synth_noteon(synth, channel, key, velocity);
+        });
+    }
+    virtual void OnNoteOff(int channel, int key) 
+    {
+        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key]()
+        {
+            fluid_synth_noteoff(synth, channel, key);
+        });
+    }
+    virtual void OnProgramChange(int channel, int program) 
+    {
+        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, program]()
+        {
+            fluid_synth_program_change(synth, channel, program);
+        });
+    }
+    virtual void OnControlChange(int channel, int ctrl, int value) 
+    {
+        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, ctrl, value]()
+        {
+            fluid_synth_cc(synth, channel, ctrl, value);
+        });
+    }
+    virtual void OnPitchBend(int channel, int value) 
+    {
+        timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channel, value]()
+        {
+            fluid_synth_pitch_bend(synth, channel, value);
+        });
     }
 };
 
@@ -171,7 +125,7 @@ void MyCFunc()
 
     int basssfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/ColomboGMGS2__SF2_/ColomboGMGS2.sf2", 1);
     int sfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/Touhou.sf2", 1);
-    int undertalesfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/undertale.sf2", 1);
+    undertalesfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/undertale.sf2", 1);
 
             std::cout << "===================" << std::endl;
 
@@ -182,11 +136,25 @@ void MyCFunc()
     try 
     {
         parser.LoadFromFile("C:/Users/thoma/Downloads/Never-Gonna-Give-You-Up-1.mid");
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/midi archive/E-Piano MIDI (2).mid");
+
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/midi archive/Rhodes MIDI (2).mid");
+
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/midi archive/Cymatics - Lofi MIDI 2 - C Maj.mid");
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/midi archive/Cymatics - Lofi MIDI 1 - C Maj.mid");
+
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/bach/bach_846.mid");
+        
     }
     catch (const std::exception& e)
     {
         std::cout << "ERROR : " << e.what() << std::endl;
         return;
+    }
+
+    for (const auto& instru : parser.programIDs)
+    {
+        std::cout << instru << std::endl;
     }
 
     cout.stream.close();
@@ -258,10 +226,11 @@ void MyCFunc()
             player.AddNote(fullNote, timeAdded, duration);
         };
 
-        auto addRhodes = [&player, undertalesfID](int key, float timeAdded, float duration)
+        int undertalesfID2 = undertalesfID;
+        auto addRhodes = [&player, undertalesfID2](int key, float timeAdded, float duration)
         {
             FullNote fullNote;
-            fullNote.fontID = undertalesfID;
+            fullNote.fontID = undertalesfID2;
             fullNote.channel = 0;
             fullNote.bankID = 0;
             fullNote.presetID = 64;
