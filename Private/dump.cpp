@@ -77,10 +77,10 @@ static void parse_and_dump(struct midi_parser *parser)
     //   puts("track-midi");
       cout << "track-midi" << '\n';
         cout << "  time: " << parser->vtime << '\n';
-        cout << "  status: " << parser->midi.status << "[" << midi_status_name(parser->midi.status) << "]" << '\n';
-        cout << "  channel: " << parser->midi.channel << '\n';
-        cout << "  param1: " << parser->midi.param1 << '\n';
-        cout << "  param2: " << parser->midi.param2 << '\n';
+        cout << "  status: " << (int) parser->midi.status << "[" << midi_status_name(parser->midi.status) << "]" << '\n';
+        cout << "  channel: " << (int) parser->midi.channel << '\n';
+        cout << "  param1: " << (int) parser->midi.param1 << '\n';
+        cout << "  param2: " << (int) parser->midi.param2 << '\n';
     //   printf("  time: %ld\n", parser->vtime);
     //   printf("  status: %d [%s]\n", parser->midi.status, midi_status_name(parser->midi.status));
     //   printf("  channel: %d\n", parser->midi.channel);
@@ -92,8 +92,17 @@ static void parse_and_dump(struct midi_parser *parser)
     //   printf("track-meta\n");
       cout << "track-meta" << '\n';
         cout << "  time: " << parser->vtime << '\n';
-        cout << "  type: " << parser->meta.type << "[" << midi_meta_name(parser->meta.type) << "]" << '\n';
+        cout << "  type: " << (int) parser->meta.type << "[" << midi_meta_name(parser->meta.type) << "]" << '\n';
         cout << "  length: " << parser->meta.length << '\n';
+
+        if (parser->meta.type == MIDI_META_TRACK_NAME)
+        {
+          cout << std::string((const char*)parser->meta.bytes, parser->meta.length) << '\n';
+        }
+        if (parser->meta.type == MIDI_META_TEXT)
+        {
+          cout << std::string((const char*)parser->meta.bytes, parser->meta.length) << '\n';
+        }
     //   printf("  time: %ld\n", parser->vtime);
     //   printf("  type: %d [%s]\n", parser->meta.type, midi_meta_name(parser->meta.type));
     //   printf("  length: %d\n", parser->meta.length);
@@ -108,7 +117,7 @@ static void parse_and_dump(struct midi_parser *parser)
 
     default:
     //   printf("unhandled state: %d\n", status);
-        cout << "unhandled state: " << status << '\n';
+        cout << "unhandled state: " << (int) status << '\n';
       return;
     }
   }
