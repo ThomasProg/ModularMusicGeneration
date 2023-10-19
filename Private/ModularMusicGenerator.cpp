@@ -9,6 +9,7 @@ extern "C" {
 
 #include <iostream>
 
+#include <filesystem>
 #include <set>
 #include <fluidsynth.h>
 #include <iostream>
@@ -22,131 +23,220 @@ extern "C" {
 #include "Debug.h"
 #include "AdvancedMIDIParser.h"
 #include "MIDIParserException.h"
+#include "LoggingMIDIParser.h"
 
 static fluid_synth_t* synth;
 static TaskScheduler timeScheduler;
 static int undertalesfID;
 
 
-class MIDIParserChild : public AdvancedMIDIParser
+ class MIDIParserChild : public AdvancedMIDIParser
+ {
+ public:
+     using Super = AdvancedMIDIParser;
+     std::set<int> programIDs;
+
+     virtual void OnSysEventLoaded(uint32_t deltaTime, SysexEvent& sysEvent) override 
+     {
+         Super::OnSysEventLoaded(deltaTime, sysEvent);
+
+         cout << "track-sysex" << '\n';
+         cout.stream << "  time: " << deltaTime << std::endl;
+     } 
+     virtual void OnMetaEventLoaded(uint32_t deltaTime, MetaEvent& metaEvent) override 
+     {
+         Super::OnMetaEventLoaded(deltaTime, metaEvent);
+
+         cout << "track-meta\n";
+         cout << "   time: " << deltaTime << '\n';
+         cout << "   type: " << (int) metaEvent.type << "[" << MidiMetaToStr(metaEvent.type) << "]\n"; 
+         cout.stream << "   length: " << (int) metaEvent.length << std::endl; 
+     }
+
+     virtual void OnChannelEventLoaded(uint32_t deltaTime, ChannelEvent& channelEvent, bool isOpti) override
+     {
+         AdvancedMIDIParser::OnChannelEventLoaded(deltaTime, channelEvent, isOpti);
+
+         cout << "track-midi" << '\n';
+         cout << "  time: " << deltaTime << '\n';
+         cout << "  status: " << (int) channelEvent.message << "[" <<  ENoteEventToStr(channelEvent.message) << "]" << '\n';
+         cout << "  channel: " << (int) channelEvent.channel << '\n';
+         cout << "  param1: " << (int) channelEvent.param1 << '\n';
+         cout.stream << "  param2: " << (int) channelEvent.param2 << std::endl;
+     }
+
+     virtual void OnNoteOn(int channel, int key, int velocity) 
+     {
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key, velocity]()
+         {
+ //             // if (channelEvent.param1 > 55 && channelEvent.param1 < 62)
+ //             // if (channelEvent.param1 > 50 && channelEvent.param1 !=69 && channelEvent.channel < 7)
+ // fluid_synth_program_select(synth, 0, undertalesfID, 0, 64);
+             fluid_synth_noteon(synth, channel, key, velocity);
+         });
+     }
+     virtual void OnNoteOff(int channel, int key) 
+     {
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key]()
+         {
+             fluid_synth_noteoff(synth, channel, key);
+         });
+     }
+     virtual void OnProgramChange(int channel, int program) 
+     {
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, program]()
+         {
+             fluid_synth_program_change(synth, channel, program);
+         });
+     }
+     virtual void OnControlChange(int channel, EControlChange ctrl, int value) 
+     {
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, ctrl, value]()
+         {
+             fluid_synth_cc(synth, channel, (int)ctrl, value);
+         });
+     }
+     virtual void OnPitchBend(int channel, int value) 
+     {
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channel, value]()
+         {
+             fluid_synth_pitch_bend(synth, channel, value);
+         });
+     }
+
+
+     virtual void OnKeySignature(uint8_t sf, uint8_t mi) override
+     {
+         // std::cout << "sf : " << (int)sf << std::endl;
+         // if (mi == 0)
+         //     std::cout << "mi : major" << std::endl;
+         // else if (mi == 1)
+         //     std::cout << "mi : minor" << std::endl;
+         // else
+         //     std::cout << "mi : " << (int)mi << std::endl;
+     }
+
+     virtual void OnText(const char* text, uint32_t length) override
+     {
+         // std::cout << "OnText : " << std::string(text, length) << std::endl;
+     }
+     virtual void OnCopyright(const char* copyright, uint32_t length) override
+     {
+         // std::cout << "OnCopyright : " << std::string(copyright, length) << std::endl;
+     }
+     virtual void OnTrackName(const char* trackName, uint32_t length) override
+     {
+         // std::cout << "OnTrackName : " << std::string(trackName, length) << std::endl;
+     }
+     virtual void OnInstrumentName(const char* instrumentName, uint32_t length) override
+     {
+         // std::cout << "OnInstrumentName : " << std::string(instrumentName, length) << std::endl;
+     }
+     virtual void OnLyric(const char* lyric, uint32_t length) override
+     {
+         // std::cout << "OnLyric : " << std::string(lyric, length) << std::endl;
+     }
+     virtual void OnMarker(const char* markerName, uint32_t length) override
+     {
+         // std::cout << "OnMarker : " << std::string(markerName, length) << std::endl;
+     }
+     virtual void OnCuePoint(const char* cuePointName, uint32_t length) override
+     {
+         // std::cout << "OnCuePoint : " << std::string(cuePointName, length) << std::endl;
+     }
+ };
+
+void displayError(const std::string& s)
 {
-public:
-    using Super = AdvancedMIDIParser;
-    std::set<int> programIDs;
+    std::cout << "\033[1;31m" << s << "\033[0m\n" << std::endl;    
+}
 
-    virtual void OnSysEventLoaded(uint32_t deltaTime, SysexEvent& sysEvent) override 
+void displaySuccess(const std::string& s)
+{
+    std::cout << "\033[1;32m" << s << "\033[0m\n" << std::endl;    
+}
+
+void TryLoadAllFiles()
+{
+    int nbFailures = 0;
+
+    int i = 0;
+    std::string path = "C:/Users/thoma/Downloads/archive";
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(path))
     {
-        Super::OnSysEventLoaded(deltaTime, sysEvent);
+        if (entry.is_directory() || entry.path().extension().string() != ".mid")
+            continue;
 
-        cout << "track-sysex" << '\n';
-        cout.stream << "  time: " << deltaTime << std::endl;
-    } 
-    virtual void OnMetaEventLoaded(uint32_t deltaTime, MetaEvent& metaEvent) override 
-    {
-        Super::OnMetaEventLoaded(deltaTime, metaEvent);
+        std::cout << "Trying to load : " << i << " / " << entry.path().string() << std::endl;
+        i++;
+        if (i < 151)
+            continue;
 
-        cout << "track-meta\n";
-        cout << "   time: " << deltaTime << '\n';
-        cout << "   type: " << (int) metaEvent.type << "[" << MidiMetaToStr(metaEvent.type) << "]\n"; 
-        cout.stream << "   length: " << (int) metaEvent.length << std::endl; 
-    }
-
-    virtual void OnChannelEventLoaded(uint32_t deltaTime, ChannelEvent& channelEvent, bool isOpti) override
-    {
-        AdvancedMIDIParser::OnChannelEventLoaded(deltaTime, channelEvent, isOpti);
-
-        cout << "track-midi" << '\n';
-        cout << "  time: " << deltaTime << '\n';
-        cout << "  status: " << (int) channelEvent.message << "[" <<  ENoteEventToStr(channelEvent.message) << "]" << '\n';
-        cout << "  channel: " << (int) channelEvent.channel << '\n';
-        cout << "  param1: " << (int) channelEvent.param1 << '\n';
-        cout.stream << "  param2: " << (int) channelEvent.param2 << std::endl;
-    }
-
-    virtual void OnNoteOn(int channel, int key, int velocity) 
-    {
-        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key, velocity]()
+        try 
         {
-//             // if (channelEvent.param1 > 55 && channelEvent.param1 < 62)
-//             // if (channelEvent.param1 > 50 && channelEvent.param1 !=69 && channelEvent.channel < 7)
-// fluid_synth_program_select(synth, 0, undertalesfID, 0, 64);
-            fluid_synth_noteon(synth, channel, key, velocity);
-        });
-    }
-    virtual void OnNoteOff(int channel, int key) 
-    {
-        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key]()
+
+            LoggingMIDIParser parser("output.txt");
+
+            std::ifstream file (entry.path(), std::ios::in|std::ios::binary|std::ios::ate);
+            if (file.is_open())
+            {
+                size_t size = file.tellg();
+                char* memblock = new char [size];
+                file.seekg (0, std::ios::beg);
+                file.read (memblock, size);
+                file.close();
+
+                parser.LoadFromBytes(memblock, size);
+                // parser.OnLoadedFromFile(filename);
+
+                delete[] memblock;
+            }
+            else
+            {
+                throw std::runtime_error("Couldn't open file : " + entry.path().string());
+            }
+
+            displaySuccess("Loaded with success! " + entry.path().string());
+            // std::cout << "Loaded with success! " << entry.path().string() << std::endl;
+        }
+        catch (const MIDIParserException& e)
         {
-            fluid_synth_noteoff(synth, channel, key);
-        });
-    }
-    virtual void OnProgramChange(int channel, int program) 
-    {
-        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, program]()
+            displayError("MIDIParserException : " + std::string(e.what()));
+            // std::cout << "MIDIParserException : " << e.what() << std::endl;
+        }
+        catch (const std::exception& e)
         {
-            fluid_synth_program_change(synth, channel, program);
-        });
+            displayError("std::exception : " + std::string(e.what()));
+            // std::cout << "std::exception : " << e.what() << std::endl;
+        }
     }
-    virtual void OnControlChange(int channel, EControlChange ctrl, int value) 
+}
+
+void InputLoop()
+{
+    while (true)
     {
-        timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, ctrl, value]()
+        std::string input;
+        std::cin >> input;
+
+        if (input[0] == '>')
         {
-            fluid_synth_cc(synth, channel, (int)ctrl, value);
-        });
-    }
-    virtual void OnPitchBend(int channel, int value) 
-    {
-        timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channel, value]()
-        {
-            fluid_synth_pitch_bend(synth, channel, value);
-        });
+           std::string subStr = input.substr(1, input.length() - 1);
+           int nbSeconds = std::stoi(subStr);
+        }
     }
 
 
-    virtual void OnKeySignature(uint8_t sf, uint8_t mi) override
-    {
-        std::cout << "sf : " << (int)sf << std::endl;
-        if (mi == 0)
-            std::cout << "mi : major" << std::endl;
-        else if (mi == 1)
-            std::cout << "mi : minor" << std::endl;
-        else
-            std::cout << "mi : " << (int)mi << std::endl;
-    }
-
-    virtual void OnText(const char* text, uint32_t length) override
-    {
-        std::cout << "OnText : " << std::string(text, length) << std::endl;
-    }
-    virtual void OnCopyright(const char* copyright, uint32_t length) override
-    {
-        std::cout << "OnCopyright : " << std::string(copyright, length) << std::endl;
-    }
-    virtual void OnTrackName(const char* trackName, uint32_t length) override
-    {
-        std::cout << "OnTrackName : " << std::string(trackName, length) << std::endl;
-    }
-    virtual void OnInstrumentName(const char* instrumentName, uint32_t length) override
-    {
-        std::cout << "OnInstrumentName : " << std::string(instrumentName, length) << std::endl;
-    }
-    virtual void OnLyric(const char* lyric, uint32_t length) override
-    {
-        std::cout << "OnLyric : " << std::string(lyric, length) << std::endl;
-    }
-    virtual void OnMarker(const char* markerName, uint32_t length) override
-    {
-        std::cout << "OnMarker : " << std::string(markerName, length) << std::endl;
-    }
-    virtual void OnCuePoint(const char* cuePointName, uint32_t length) override
-    {
-        std::cout << "OnCuePoint : " << std::string(cuePointName, length) << std::endl;
-    }
-};
+}
 
 void MyCFunc()
 {
-    // v();
+    // std::thread first (TryLoadAllFiles);
+    // // TryLoadAllFiles();
+    // InputLoop();
+
+    // return;
+    // // v();
 
     // Create the FluidSynth settings and synthesizer objects
     fluid_settings_t* settings = new_fluid_settings();
@@ -157,7 +247,7 @@ void MyCFunc()
     fluid_audio_driver_t* adriver = new_fluid_audio_driver(settings, synth);
 
     // Increase the volume (gain) for the entire synth
-    double volume = 0.5; // Adjust the volume level (1.0 is the default, higher values increase the volume)
+    double volume = 0.1; // Adjust the volume level (1.0 is the default, higher values increase the volume)
     fluid_settings_setnum(settings, "synth.gain", volume);
 
     // Load a SoundFont file
@@ -165,14 +255,15 @@ void MyCFunc()
     // const char* soundfontPath = "C:/Users/thoma/Downloads/undertale.sf2";
     // int sfID = fluid_synth_sfload(synth, soundfontPath, 1);
 
-    int basssfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/ColomboGMGS2__SF2_/ColomboGMGS2.sf2", 1);
-    int sfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/Touhou.sf2", 1);
     undertalesfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/undertale.sf2", 1);
+    int sfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/Touhou.sf2", 1);
+    int basssfID = fluid_synth_sfload(synth, "C:/Users/thoma/Downloads/ColomboGMGS2__SF2_/ColomboGMGS2.sf2", 1);
 
             std::cout << "===================" << std::endl;
 
             // parse_file("C:/Users/thoma/Downloads/Never-Gonna-Give-You-Up-1.mid");
             // parse_file("C:/Users/thoma/Downloads/bach/bach_847.mid");
+            // parse_file("C:/Users/thoma/Downloads/archive/Lucifer/Selfpity.mid");
             // return;
 
     MIDIParserChild parser;
@@ -187,10 +278,36 @@ void MyCFunc()
         // parser.LoadFromFile("C:/Users/thoma/Downloads/midi archive/Cymatics - Lofi MIDI 1 - C Maj.mid");
 
         //  parser.LoadFromFile("C:/Users/thoma/Downloads/bach/bach_850.mid");
-        parser.LoadFromFile("C:/Users/thoma/Downloads/bach/bach_847.mid");
-        
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/bach/bach_847.mid");
+
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/al_adagi.mid"); // CRASH
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/Hooters_-_And_We_Danced.mid");
+
+        // http://www.madore.org/~david/music/midi/
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/turc.mid");
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/rulebrit.mid");
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/legdam10.mid");
+
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/lofi-record (4).mp3.mid");
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/e-gmd-v1.0.0-midi/e-gmd-v1.0.0/drummer1/session1/149_latin-brazilian-baiao_95_fill_4-4_3.midi");
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/e-gmd-v1.0.0-midi/e-gmd-v1.0.0/drummer9/session1/24_rock_90_beat_4-4_23.midi");
+    
+        std::string s = "C:/Users/thoma/Downloads/archive/Ludwig_van_Beethoven/";
+        std::string s2 = "C:/Users/thoma/Downloads/archive/";
+        // parser.LoadFromFile((s + "Fur_Elise.2.mid").c_str());
+        parser.LoadFromFile("C:/Users/thoma/Downloads/archive/Bach_Johann_Sebastian/Toccata_and_Fugue_in_D_minor,_BWV_565.1.mid");
+
+        // parser.LoadFromFile("C:/Users/thoma/Downloads/archive/Zappa/The_Black_Page_1.1.mid");
+        // parser.LoadFromFile((s + "Fur_Elise.1.mid").c_str());
+        // parser.LoadFromFile((s + "Piano_Sonata_No._14_in_C-sharp_minor,_Op._27_No._2_Moonlight_I._Adagio_sostenuto.mid").c_str());
+    
+        // parser.LoadFromFile((s + "Ode_to_Joy_from_the_9th_Symphony.mid").c_str());
+        // parser.LoadFromFile((s + "Piano_Sonata_No._14_in_C-sharp_minor,_Op._27_No._2_Moonlight_I._Adagio_sostenuto.mid").c_str());
+        // parser.LoadFromFile((s2 + "Lucifer/Selfpity.mid").c_str());
+
     }
     catch (const MIDIParserException& e)
+    
     {
         std::cout << "ERROR : " << e.what() << std::endl;
         return;
@@ -201,10 +318,10 @@ void MyCFunc()
         return;
     }
 
-    for (const auto& instru : parser.programIDs)
-    {
-        std::cout << instru << std::endl;
-    }
+    // for (const auto& instru : parser.programIDs)
+    // {
+    //     std::cout << instru << std::endl;
+    // }
 
     cout.stream.close();
 
@@ -254,7 +371,7 @@ void MyCFunc()
 
         fluid_player_t* player2 = new_fluid_player(synth);
         // fluid_player_add(player2, "C:/Users/thoma/Downloads/Never-Gonna-Give-You-Up-1.mid");
-        fluid_player_add(player2, "C:/Users/thoma/Downloads/bach/bach_847.mid");
+        fluid_player_add(player2, "C:/Users/thoma/Downloads/archive/Lucifer/Selfpity.mid");
         /* play the midi files, if any */
         fluid_player_play(player2);
         /* wait for playback termination */
