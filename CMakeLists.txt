@@ -19,19 +19,19 @@ target_link_libraries(${LibName} EasyMidiFileParserCpp)
 set(enable-pkgconfig false) 
 set(BUILD_SHARED_LIBS ON)
 
-target_link_libraries(${LibName} "${ModulesDirectory}/fluidsynth/lib/libfluidsynth.dll.a")
+target_link_libraries(${LibName} "${ModulesDirectory}/fluidsynth/Downloads/lib/libfluidsynth.dll.a")
 target_compile_definitions(${LibName} PRIVATE MMG_EXPORT)
 
 target_include_directories(${LibName} PUBLIC 
     "${PROJECT_SOURCE_DIR}/Public/" 
-    "${ModulesDirectory}/fluidsynth/include"
+    "${ModulesDirectory}/fluidsynth/Downloads/include"
     "${ModulesDirectory}/EasyMidiFileParserCpp/Public"
 )
 
 add_custom_command(TARGET ${LibName}
   POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory 
-  "${ModulesDirectory}/fluidsynth/bin/" 
+  "${ModulesDirectory}/fluidsynth/Downloads/bin/" 
   ${ModularMusicGenerationCore_BINARY_DIR}/$<CONFIG>/.
 )
 
