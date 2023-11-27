@@ -67,7 +67,7 @@ static int undertalesfID;
 
      virtual void OnNoteOn(int channel, int key, int velocity) 
      {
-         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key, velocity]()
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channel, key, velocity]()
          {
  //             // if (channelEvent.param1 > 55 && channelEvent.param1 < 62)
  //             // if (channelEvent.param1 > 50 && channelEvent.param1 !=69 && channelEvent.channel < 7)
@@ -77,21 +77,21 @@ static int undertalesfID;
      }
      virtual void OnNoteOff(int channel, int key) 
      {
-         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, key]()
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channel, key]()
          {
              fluid_synth_noteoff(synth, channel, key);
          });
      }
      virtual void OnProgramChange(int channel, int program) 
      {
-         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, program]()
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channel, program]()
          {
              fluid_synth_program_change(synth, channel, program);
          });
      }
      virtual void OnControlChange(int channel, EControlChange ctrl, int value) 
      {
-         timeScheduler.RunAt(timePerTrack[currentTrackIndex] * (tempo / ticksPerQuarterNote) / 1000, [channel, ctrl, value]()
+         timeScheduler.RunAt(timePerTrack[currentTrackIndex], [channel, ctrl, value]()
          {
              fluid_synth_cc(synth, channel, (int)ctrl, value);
          });
