@@ -17,7 +17,7 @@ extern "C" {
 #include <thread>
 #include <map>
 #include "SchedulerExample.h"
-#include "MIDIParser.h"
+#include "MIDIParserBase.h"
 #include "TaskScheduler.h"
 #include "dump.h"
 #include "Debug.h"
@@ -49,7 +49,7 @@ static int undertalesfID;
 
          cout << "track-meta\n";
          cout << "   time: " << deltaTime << '\n';
-         cout << "   type: " << (int) metaEvent.type << "[" << MidiMetaToStr(metaEvent.type) << "]\n"; 
+         cout << "   type: " << (int) metaEvent.type << "[" << MIDIParser::MidiMetaToStr(metaEvent.type) << "]\n";
          cout.stream << "   length: " << (int) metaEvent.length << std::endl; 
      }
 
@@ -59,7 +59,7 @@ static int undertalesfID;
 
          cout << "track-midi" << '\n';
          cout << "  time: " << deltaTime << '\n';
-         cout << "  status: " << (int) channelEvent.message << "[" <<  ENoteEventToStr(channelEvent.message) << "]" << '\n';
+         cout << "  status: " << (int) channelEvent.message << "[" << MIDIParser::ENoteEventToStr(channelEvent.message) << "]" << '\n';
          cout << "  channel: " << (int) channelEvent.channel << '\n';
          cout << "  param1: " << (int) channelEvent.param1 << '\n';
          cout.stream << "  param2: " << (int) channelEvent.param2 << std::endl;
@@ -186,7 +186,7 @@ void TryLoadAllFiles()
                 file.read (memblock, size);
                 file.close();
 
-                parser.LoadFromBytes(memblock, size);
+                parser.parser.LoadFromBytes(memblock, size);
                 // parser.OnLoadedFromFile(filename);
 
                 delete[] memblock;
@@ -295,7 +295,7 @@ void MyCFunc()
         std::string s = "C:/Users/thoma/Downloads/archive/Ludwig_van_Beethoven/";
         std::string s2 = "C:/Users/thoma/Downloads/archive/";
         // parser.LoadFromFile((s + "Fur_Elise.2.mid").c_str());
-        parser.LoadFromFile("C:/Users/thoma/Downloads/archive/Bach_Johann_Sebastian/Toccata_and_Fugue_in_D_minor,_BWV_565.1.mid");
+        parser.parser.LoadFromFile("C:/Users/thoma/Downloads/archive/Bach_Johann_Sebastian/Toccata_and_Fugue_in_D_minor,_BWV_565.1.mid");
 
         // parser.LoadFromFile("C:/Users/thoma/Downloads/archive/Zappa/The_Black_Page_1.1.mid");
         // parser.LoadFromFile((s + "Fur_Elise.1.mid").c_str());
